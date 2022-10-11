@@ -1,83 +1,117 @@
 package com.example.erpdownloader;
 
-import net.lingala.zip4j.ZipFile;
-import net.lingala.zip4j.util.Zip4jUtil;
 import org.bson.Document;
 import org.json.JSONObject;
 import org.json.XML;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.io.*;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 @Service
 public class Downloader {
-    private final static String xmlContent = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n" +
-            "<list>\n" +
-            "<standardversion>\n" +
-            "<item identifier=\"1\" title=\"Проверки на Январь 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-1.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"2\" title=\"Проверки на Октябрь 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-10.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"3\" title=\"Проверки на Ноябрь 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-11.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"4\" title=\"Проверки на Декабрь 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-12.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"5\" title=\"Проверки на Февраль 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-2.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"6\" title=\"Проверки на Март 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-3.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"7\" title=\"Проверки на Апрель 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-4.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"8\" title=\"Проверки на Май 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-5.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"9\" title=\"Проверки на Июнь 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-6.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"10\" title=\"Проверки на Июль 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-7.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"11\" title=\"Проверки на Август 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-8.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"12\" title=\"Проверки на Сентябрь 2021 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2021-9.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"13\" title=\"Проверки на Январь 2022 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2022-1.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"14\" title=\"Проверки на Октябрь 2022 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2022-10.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"15\" title=\"Проверки на Ноябрь 2022 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2022-11.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"16\" title=\"Проверки на Февраль 2022 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2022-2.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"17\" title=\"Проверки на Март 2022 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2022-3.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"18\" title=\"Проверки на Апрель 2022 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2022-4.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"19\" title=\"Проверки на Май 2022 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2022-5.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"20\" title=\"Проверки на Июнь 2022 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2022-6.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"21\" title=\"Проверки на Июль 2022 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2022-7.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"22\" title=\"Проверки на Август 2022 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2022-8.xml\" format=\"xml\"/>\n" +
-            "<item identifier=\"23\" title=\"Проверки на Сентябрь 2022 года\" link=\"https://proverki.gov.ru/blob/opendata/7710146102-inspection-2022-9.xml\" format=\"xml\"/>\n" +
-            "</standardversion>\n" +
-            "</list>";
 
-    public static void main(String[] args) {
+    @Autowired
+    private QueueSender sender;
+
+    public void download() {
+
+        RestTemplate restTemplate = new RestTemplate();
+        //Реестр наборов данных
+        String xmlContent = restTemplate.getForObject("https://proverki.gov.ru/blob/opendata/list.xml", String.class);
         JSONObject xmlJSONObj = XML.toJSONObject(xmlContent);
         //4
         String jsonPrettyPrintString = xmlJSONObj.toString();
 //        System.out.println(jsonPrettyPrintString);
         Document list = Document.parse(jsonPrettyPrintString);
+        //Собираем линки на проверки
         List<String> links = (List<String>) list.get("list", Document.class)
                 .get("standardversion", Document.class)
                 .get("item", List.class).stream()
                 .map(d -> ((Document) d).getString("link"))
                 .collect(Collectors.toList());
-        //links.forEach(System.out::println);
-        RestTemplate restTemplate = new RestTemplate();
-        //TODO пробежаться по всему списку
-        String xmlDoc = restTemplate.getForObject(links.get(0), String.class);
-
-        xmlJSONObj = XML.toJSONObject(xmlDoc);
-        System.out.println(xmlJSONObj.toString(4));
-        Document listZipFiles = Document.parse(xmlJSONObj.toString());
-        List<String> zipFilesNames = (List<String>) listZipFiles.get("meta", Document.class).get("data", Document.class).get("dataversion", List.class).stream()
-                .map(d -> ((Document) d).getString("source"))
-                .collect(Collectors.toList());
-        //TODO пробежаться по всем
-        zipFilesNames.forEach(url -> {
-            byte[] bytes = restTemplate.getForObject(url, byte[].class);
-            ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(bytes));
-            try {
-                Files.write(Paths.get("c:\\xml\\" + zipInputStream.getNextEntry().getName() + ".zip"), bytes);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+        //отсортировать по времени
+        Map<LocalDate, String> sortedLinks = new TreeMap<>();
+        links.stream().filter(l -> l.contains("inspection-20")).forEach(l -> sortedLinks.put(getDateFromLink(l), l));
+        //sortedLinks.values().forEach(System.out::println);
+        //TODO Пробежаться по всем
+        for (String link : links) {
+            System.out.print("\ndownloading " + link + " ");
+            String xmlDoc = restTemplate.getForObject(link, String.class);
+            System.out.println("[X]");
+            xmlJSONObj = XML.toJSONObject(xmlDoc);
+            //System.out.println(xmlJSONObj.toString(4));
+            Document listZipFiles = Document.parse(xmlJSONObj.toString());
+            List<String> zipFilesNames = (List<String>) listZipFiles.get("meta", Document.class).get("data", Document.class).get("dataversion", List.class).stream()
+                    .map(d -> ((Document) d).getString("source"))
+                    .collect(Collectors.toList());
+            //Взять последнюю запись месяца
+            String url = zipFilesNames.get(zipFilesNames.size() - 1);
+            //Получить xml
+            String xml = createXml(restTemplate, url);
+            //порезать на отдельные проверки и отправить в rabbit
+            int length = xml.length();
+            while (xml.contains("</INSPECTION>")) {
+                int size = xml.indexOf("</INSPECTION>");
+                String inspection = xml.substring(xml.indexOf("<INSPECTION "), size) + "</INSPECTION>";
+                //отправить в rabbit
+                int index = xml.indexOf("\" ERPID=\"");
+                System.out.println(xml.substring(index, index + 22) + " осталось символов " + ((double)xml.length() / length) * 100 + "%");
+                if (sender.send(inspection) > 2) try {
+                    System.out.println("pause");
+                    Thread.sleep(5000);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                xml = xml.substring(size + 1);
             }
-        });
+        }
+    }
+
+    private static void printToFile(String xml, String path) {
+        try (PrintWriter printWriter = new PrintWriter(path)) {
+            printWriter.print(xml);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static String createXml(RestTemplate restTemplate, String url) {
+        String xml;
+        System.out.print("Downloading " + url);
+        byte[] bytes = restTemplate.getForObject(url, byte[].class);
+        System.out.println("[X]");
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(bytes));
+             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream()) {
+            System.out.println("unpacking");
+            ZipEntry zipEntry;
+            while ((zipEntry = zipInputStream.getNextEntry()) != null) {
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                int c;
+                while ((c = zipInputStream.read()) != -1) {
+                    byteArrayOutputStream.write(c);
+                }
+            }
+            return new String(byteArrayOutputStream.toByteArray());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static LocalDate getDateFromLink(String link) {
+        link = link.substring(link.indexOf("inspection-20"), link.indexOf(".xml"));
+        link = link.substring(link.indexOf("20"));
+        String[] date = link.split("-");
+        return LocalDate.of(Integer.parseInt(date[0]), Integer.parseInt(date[1]), 1);
+
     }
 }
