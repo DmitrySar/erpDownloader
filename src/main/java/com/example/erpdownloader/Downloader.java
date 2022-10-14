@@ -8,17 +8,22 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 @Service
 public class Downloader {
 
+    public final static String TEMP_XML_FILE_NAME = "c:\\xml\\tmp.xml";
     @Autowired
     private QueueSender sender;
 
@@ -44,7 +49,7 @@ public class Downloader {
         //sortedLinks.values().forEach(System.out::println);
 
         //TODO Пробежаться по всем
-        for (String link : sortedLinks.values().stream().skip(1).collect(Collectors.toList())) {
+        for (String link : sortedLinks.values().stream().skip(2).collect(Collectors.toList())) {
             System.out.print("\ndownloading " + link + " ");
             String xmlDoc = restTemplate.getForObject(link, String.class);
             System.out.println("[X]");
@@ -57,24 +62,29 @@ public class Downloader {
             //Взять последнюю запись месяца
             String url = zipFilesNames.get(zipFilesNames.size() - 1);
             //Получить xml
-            String xml = createXml(restTemplate, url);
+            createXml(restTemplate, url);
             //порезать на отдельные проверки и отправить в rabbit
-            int length = xml.length();
-            long count = 0;
-            while (xml.contains("</INSPECTION>")) {
-                int size = xml.indexOf("</INSPECTION>");
-                String inspection = xml.substring(xml.indexOf("<INSPECTION "), size) + "</INSPECTION>";
-                //отправить в rabbit
-                int index = xml.indexOf("\" ERPID=\"");
-                sender.send(inspection);
-                System.out.printf("%s %s - %.2f%%\n", ++count, xml.substring(index, index + 22), 100.0 - ((double)xml.length() / length) * 100);
-//                try {
-//                    Thread.sleep(25);
-//                } catch (InterruptedException e) {
-//                    throw new RuntimeException(e);
-//                }
-                xml = xml.substring(size + 1);
-            }
+            cutStringAndSendToRabbitmq(TEMP_XML_FILE_NAME);
+        }
+    }
+
+    public void cutStringAndSendToRabbitmq(String path) {
+        StringBuilder res = new StringBuilder();
+        AtomicLong count = new AtomicLong();
+        try (Stream<String> stream = Files.lines(Paths.get(path))) {
+            stream.forEach(d -> {
+                if (d.contains("</INSPECTION>")) {
+                    if (res.indexOf("<INSPECTION ") != -1) res.replace(0, res.lastIndexOf("<INSPECTION "), "");
+                    res.append(d);
+                    sender.send(res.toString());
+                    System.out.println(count.incrementAndGet() + res.substring(0, 150));
+                    res.setLength(0);
+                } else {
+                    res.append(d);
+                }
+            });
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -86,28 +96,28 @@ public class Downloader {
         }
     }
 
-    private static String createXml(RestTemplate restTemplate, String url) {
-        String xml;
+    private static void createXml(RestTemplate restTemplate, String url) {
         System.out.print("downloading " + url);
         byte[] bytes = restTemplate.getForObject(url, byte[].class);
         System.out.println("[X]");
-        String result = "";
+        Stream<String> result;
         try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(bytes));
-             ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream()) {
+             //ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream()
+             FileOutputStream fos = new FileOutputStream(TEMP_XML_FILE_NAME)) {
             System.out.println("unpacking");
             ZipEntry zipEntry;
             while ((zipEntry = zipInputStream.getNextEntry()) != null) {
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 int c;
                 while ((c = zipInputStream.read()) != -1) {
-                    byteArrayOutputStream.write(c);
+                    //byteArrayOutputStream.write(c);
+                    fos.write(c);
                 }
             }
-            result = new String(byteArrayOutputStream.toByteArray());
+            //result = new String(byteArrayOutputStream.toByteArray());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        return result;
     }
 
     private static LocalDate getDateFromLink(String link) {
