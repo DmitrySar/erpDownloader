@@ -4,7 +4,6 @@ import org.bson.Document;
 import org.json.JSONObject;
 import org.json.XML;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -43,8 +42,9 @@ public class Downloader {
         Map<LocalDate, String> sortedLinks = new TreeMap<>();
         links.stream().filter(l -> l.contains("inspection-20")).forEach(l -> sortedLinks.put(getDateFromLink(l), l));
         //sortedLinks.values().forEach(System.out::println);
+
         //TODO Пробежаться по всем
-        for (String link : links) {
+        for (String link : sortedLinks.values().stream().skip(1).collect(Collectors.toList())) {
             System.out.print("\ndownloading " + link + " ");
             String xmlDoc = restTemplate.getForObject(link, String.class);
             System.out.println("[X]");
@@ -60,18 +60,19 @@ public class Downloader {
             String xml = createXml(restTemplate, url);
             //порезать на отдельные проверки и отправить в rabbit
             int length = xml.length();
+            long count = 0;
             while (xml.contains("</INSPECTION>")) {
                 int size = xml.indexOf("</INSPECTION>");
                 String inspection = xml.substring(xml.indexOf("<INSPECTION "), size) + "</INSPECTION>";
                 //отправить в rabbit
                 int index = xml.indexOf("\" ERPID=\"");
-                System.out.println(xml.substring(index, index + 22) + " осталось символов " + ((double)xml.length() / length) * 100 + "%");
-                if (sender.send(inspection) > 2) try {
-                    System.out.println("pause");
-                    Thread.sleep(5000);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+                sender.send(inspection);
+                System.out.printf("%s %s - %.2f%%\n", ++count, xml.substring(index, index + 22), 100.0 - ((double)xml.length() / length) * 100);
+//                try {
+//                    Thread.sleep(25);
+//                } catch (InterruptedException e) {
+//                    throw new RuntimeException(e);
+//                }
                 xml = xml.substring(size + 1);
             }
         }
@@ -87,9 +88,10 @@ public class Downloader {
 
     private static String createXml(RestTemplate restTemplate, String url) {
         String xml;
-        System.out.print("Downloading " + url);
+        System.out.print("downloading " + url);
         byte[] bytes = restTemplate.getForObject(url, byte[].class);
         System.out.println("[X]");
+        String result = "";
         try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(bytes));
              ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream()) {
             System.out.println("unpacking");
@@ -101,10 +103,11 @@ public class Downloader {
                     byteArrayOutputStream.write(c);
                 }
             }
-            return new String(byteArrayOutputStream.toByteArray());
+            result = new String(byteArrayOutputStream.toByteArray());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+        return result;
     }
 
     private static LocalDate getDateFromLink(String link) {
