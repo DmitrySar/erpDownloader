@@ -27,7 +27,7 @@ public class Downloader {
     @Autowired
     private QueueSender sender;
 
-    public void download() {
+    public void download(int skipMonthCount, int limitMonthCount, int skipCountInMonth, int limitCountInMonth) {
 
         RestTemplate restTemplate = new RestTemplate();
         //Реестр наборов данных
@@ -46,10 +46,10 @@ public class Downloader {
         //отсортировать по времени
         Map<LocalDate, String> sortedLinks = new TreeMap<>();
         links.stream().filter(l -> l.contains("inspection-20")).forEach(l -> sortedLinks.put(getDateFromLink(l), l));
-        //sortedLinks.values().forEach(System.out::println);
+        sortedLinks.values().forEach(System.out::println);
 
         //TODO Пробежаться по всем
-        for (String link : sortedLinks.values().stream().skip(2).collect(Collectors.toList())) {
+        for (String link : sortedLinks.values().stream().skip(skipMonthCount).limit(limitMonthCount).collect(Collectors.toList())) {
             System.out.print("\ndownloading " + link + " ");
             String xmlDoc = restTemplate.getForObject(link, String.class);
             System.out.println("[X]");
@@ -60,11 +60,13 @@ public class Downloader {
                     .map(d -> ((Document) d).getString("source"))
                     .collect(Collectors.toList());
             //Взять последнюю запись месяца
-            String url = zipFilesNames.get(zipFilesNames.size() - 1);
-            //Получить xml
-            createXml(restTemplate, url);
-            //порезать на отдельные проверки и отправить в rabbit
-            cutStringAndSendToRabbitmq(TEMP_XML_FILE_NAME);
+            //String url = zipFilesNames.get(zipFilesNames.size() - 1);
+            //Пробегаемся по всем вложенным
+            zipFilesNames.stream().skip(skipCountInMonth).limit(limitCountInMonth).forEach(url -> {
+                //Получить xml
+                createXml(restTemplate, url);
+                //порезать на отдельные проверки и отправить в rabbit
+                cutStringAndSendToRabbitmq(TEMP_XML_FILE_NAME);});
         }
     }
 
