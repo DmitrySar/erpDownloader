@@ -24,7 +24,7 @@ public class QueueSender {
     public int send(String message) {
         rabbitTemplate.convertAndSend(queueName, message);
         Properties properties = admin.getQueueProperties(queueName);
-        return (int) properties.get("QUEUE_CONSUMER_COUNT");
+        return (int) properties.get("QUEUE_MESSAGE_COUNT");
     }
 
 }

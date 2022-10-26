@@ -3,30 +3,37 @@ package com.example.erpdownloader;
 import org.bson.Document;
 import org.json.JSONObject;
 import org.json.XML;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.io.*;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.file.*;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 @Service
 public class Downloader {
+    private static final Logger LOG = LoggerFactory.getLogger(Downloader.class);
 
     public final static String TEMP_XML_FILE_NAME = "c:\\xml\\tmp.xml";
+    public final static int QUEUE_MESSAGE_COUNT = 40_000;
     @Autowired
     private QueueSender sender;
 
-    public void download(int skipMonthCount, int limitMonthCount, int skipCountInMonth, int limitCountInMonth) {
+    public void download(int skipMonthCount, int limitMonthCount) {
 
         RestTemplate restTemplate = new RestTemplate();
         //Реестр наборов данных
@@ -47,7 +54,6 @@ public class Downloader {
         links.stream().filter(l -> l.contains("inspection-20")).forEach(l -> sortedLinks.put(getDateFromLink(l), l));
         sortedLinks.values().forEach(System.out::println);
 
-        //TODO Пробежаться по всем
         for (String link : sortedLinks.values().stream().skip(skipMonthCount).limit(limitMonthCount).collect(Collectors.toList())) {
             System.out.print("\ndownloading " + link + " ");
             String xmlDoc = restTemplate.getForObject(link, String.class);
@@ -61,7 +67,7 @@ public class Downloader {
             //Взять последнюю запись месяца
             //String url = zipFilesNames.get(zipFilesNames.size() - 1);
             //Пробегаемся по всем вложенным
-            zipFilesNames.stream().skip(skipCountInMonth).limit(limitCountInMonth).forEach(url -> {
+            zipFilesNames.stream().forEach(url -> {
                 //Получить xml
                 createXml(restTemplate, url);
                 //порезать на отдельные проверки и отправить в rabbit
@@ -78,14 +84,22 @@ public class Downloader {
                 if (d.contains("</INSPECTION>")) {
                     if (res.indexOf("<INSPECTION ") != -1) res.replace(0, res.lastIndexOf("<INSPECTION "), "");
                     res.append(d);
-                    sender.send(res.toString());
+                    int messageCount = sender.send(res.toString());
                     System.out.println(count.incrementAndGet() + res.substring(0, 150));
+                    if (messageCount > QUEUE_MESSAGE_COUNT) {
+                        try {
+                            TimeUnit.SECONDS.sleep(10);
+                        } catch (InterruptedException e) {
+                            LOG.error(e.getLocalizedMessage());
+                        }
+                    }
                     res.setLength(0);
                 } else {
                     res.append(d);
                 }
             });
         } catch (IOException e) {
+            LOG.error(e.getLocalizedMessage());
             throw new RuntimeException(e);
         }
     }
@@ -118,6 +132,7 @@ public class Downloader {
             Files.copy(fileToExtract, xmlOutputStream);
             System.out.println("[X]}");
         } catch (IOException e) {
+            LOG.error(e.getLocalizedMessage());
             throw new RuntimeException(e);
         }
     }
