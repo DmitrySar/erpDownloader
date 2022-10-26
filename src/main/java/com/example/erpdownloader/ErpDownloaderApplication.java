@@ -24,7 +24,7 @@ public class ErpDownloaderApplication {
     @Bean
     public void startProcess() {
         System.out.println("\n==========================\nПоехали\n==========================\n");
-        downloader.download(0, 1, 0, 1);
+        downloader.download(0, 1, 7, 2);
         //downloader.cutStringAndSendToRabbitmq(Downloader.TEMP_XML_FILE_NAME);
     }
 

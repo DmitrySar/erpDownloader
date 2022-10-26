@@ -8,8 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -18,7 +17,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.util.zip.ZipFile;
 
 @Service
 public class Downloader {
@@ -66,7 +65,8 @@ public class Downloader {
                 //Получить xml
                 createXml(restTemplate, url);
                 //порезать на отдельные проверки и отправить в rabbit
-                cutStringAndSendToRabbitmq(TEMP_XML_FILE_NAME);});
+                cutStringAndSendToRabbitmq(TEMP_XML_FILE_NAME);
+            });
         }
     }
 
@@ -102,21 +102,21 @@ public class Downloader {
         System.out.print("downloading " + url);
         byte[] bytes = restTemplate.getForObject(url, byte[].class);
         System.out.println("[X]");
-        Stream<String> result;
-        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(bytes));
-             //ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream()
-             FileOutputStream fos = new FileOutputStream(TEMP_XML_FILE_NAME)) {
-            System.out.println("unpacking");
-            ZipEntry zipEntry;
-            while ((zipEntry = zipInputStream.getNextEntry()) != null) {
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                int c;
-                while ((c = zipInputStream.read()) != -1) {
-                    //byteArrayOutputStream.write(c);
-                    fos.write(c);
-                }
-            }
-            //result = new String(byteArrayOutputStream.toByteArray());
+        System.out.print("save zip ");
+        try (FileOutputStream zipOutputStream = new FileOutputStream(TEMP_XML_FILE_NAME + ".zip")) {
+            zipOutputStream.write(bytes);
+            System.out.println("[X]");
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        System.out.print("unpacking zip ");
+
+        try (FileSystem fileSystem = FileSystems.newFileSystem(Paths.get(TEMP_XML_FILE_NAME + ".zip"), null);
+             FileOutputStream xmlOutputStream = new FileOutputStream(TEMP_XML_FILE_NAME);
+             ZipFile zipFile = new ZipFile(TEMP_XML_FILE_NAME + ".zip")) {
+            Path fileToExtract = fileSystem.getPath(zipFile.entries().nextElement().getName());
+            Files.copy(fileToExtract, xmlOutputStream);
+            System.out.println("[X]}");
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
