@@ -15,11 +15,11 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.*;
 import java.time.LocalDate;
-import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.ZipFile;
@@ -67,7 +67,10 @@ public class Downloader {
             //Взять последнюю запись месяца
             //String url = zipFilesNames.get(zipFilesNames.size() - 1);
             //Пробегаемся по всем вложенным
-            zipFilesNames.stream().forEach(url -> {
+            int fileCount = zipFilesNames.size();
+            AtomicInteger currentCount = new AtomicInteger(0);
+            zipFilesNames.stream().skip(0).forEach(url -> {
+                //System.out.println("Обрабатывается " + currentCount.incrementAndGet() + " из " + fileCount);
                 //Получить xml
                 createXml(restTemplate, url);
                 //порезать на отдельные проверки и отправить в rabbit
@@ -84,15 +87,8 @@ public class Downloader {
                 if (d.contains("</INSPECTION>")) {
                     if (res.indexOf("<INSPECTION ") != -1) res.replace(0, res.lastIndexOf("<INSPECTION "), "");
                     res.append(d);
-                    int messageCount = sender.send(res.toString());
-                    System.out.println(count.incrementAndGet() + res.substring(0, 150));
-                    if (messageCount > QUEUE_MESSAGE_COUNT) {
-                        try {
-                            TimeUnit.SECONDS.sleep(10);
-                        } catch (InterruptedException e) {
-                            LOG.error(e.getLocalizedMessage());
-                        }
-                    }
+                    System.out.print(count.incrementAndGet() + " ");
+                    processSender.accept(res);
                     res.setLength(0);
                 } else {
                     res.append(d);
@@ -103,6 +99,24 @@ public class Downloader {
             throw new RuntimeException(e);
         }
     }
+
+    private Consumer<StringBuilder> processSender = res -> {
+        int messageCount = sender.send(res.toString());
+        System.out.print(res.substring(0, 150) + "\r");
+        if (messageCount > QUEUE_MESSAGE_COUNT) {
+            try {
+                TimeUnit.SECONDS.sleep(10);
+            } catch (InterruptedException e) {
+                LOG.error(e.getLocalizedMessage());
+            }
+        }
+    };
+
+    private Set<String> erpids = new HashSet<>();
+    private Consumer<StringBuilder> processStub = res -> {
+        erpids.add(res.substring(res.indexOf("ERPID="), res.indexOf("ITYPE_NAME=")));
+        System.out.print(erpids.size() + "\r");
+    };
 
     private static void printToFile(String xml, String path) {
         try (PrintWriter printWriter = new PrintWriter(path)) {
