@@ -68,11 +68,12 @@ public class Downloader {
             //String url = zipFilesNames.get(zipFilesNames.size() - 1);
             //Пробегаемся по всем вложенным
             int fileCount = zipFilesNames.size();
-            AtomicInteger currentCount = new AtomicInteger(0);
-            zipFilesNames.stream().skip(0).forEach(url -> {
-                //System.out.println("Обрабатывается " + currentCount.incrementAndGet() + " из " + fileCount);
+            AtomicInteger currentCount = new AtomicInteger(174);
+            zipFilesNames.stream().skip(174).forEach(url -> {
+                System.out.println("Обрабатывается " + currentCount.incrementAndGet() + " из " + fileCount);
                 //Получить xml
-                createXml(restTemplate, url);
+                while (createXml(restTemplate, url))
+                    waitSeconds(60);
                 //порезать на отдельные проверки и отправить в rabbit
                 cutStringAndSendToRabbitmq(TEMP_XML_FILE_NAME);
             });
@@ -104,13 +105,17 @@ public class Downloader {
         int messageCount = sender.send(res.toString());
         System.out.print(res.substring(0, 150) + "\r");
         if (messageCount > QUEUE_MESSAGE_COUNT) {
-            try {
-                TimeUnit.SECONDS.sleep(10);
-            } catch (InterruptedException e) {
-                LOG.error(e.getLocalizedMessage());
-            }
+            waitSeconds(10);
         }
     };
+
+    private static void waitSeconds(int timeout) {
+        try {
+            TimeUnit.SECONDS.sleep(timeout);
+        } catch (InterruptedException e) {
+            LOG.error(e.getLocalizedMessage());
+        }
+    }
 
     private Set<String> erpids = new HashSet<>();
     private Consumer<StringBuilder> processStub = res -> {
@@ -126,16 +131,18 @@ public class Downloader {
         }
     }
 
-    private static void createXml(RestTemplate restTemplate, String url) {
+    private static boolean createXml(RestTemplate restTemplate, String url) {
         System.out.print("downloading " + url);
-        byte[] bytes = restTemplate.getForObject(url, byte[].class);
+
         System.out.println("[X]");
         System.out.print("save zip ");
         try (FileOutputStream zipOutputStream = new FileOutputStream(TEMP_XML_FILE_NAME + ".zip")) {
+            byte[] bytes = restTemplate.getForObject(url, byte[].class);
             zipOutputStream.write(bytes);
             System.out.println("[X]");
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            LOG.error(e.getLocalizedMessage());
+            return true;
         }
         System.out.print("unpacking zip ");
 
@@ -147,8 +154,8 @@ public class Downloader {
             System.out.println("[X]}");
         } catch (IOException e) {
             LOG.error(e.getLocalizedMessage());
-            throw new RuntimeException(e);
         }
+        return false;
     }
 
     private static LocalDate getDateFromLink(String link) {
