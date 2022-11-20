@@ -14,6 +14,6 @@ public class DownloaderTest {
     @Test
     public void cutStringAndSendToRabbitmq() {
         Downloader downloader = new Downloader();
-        downloader.cutStringAndSendToRabbitmq(Downloader.TEMP_XML_FILE_NAME);
+        downloader.cutStringAndSendToRabbitmq("/home/dmiyry/xml/tmp.xml", text -> System.out.print(text.substring(text.indexOf("ERPID"), text.indexOf("ERPID") + 20) + "\r"));
     }
 }

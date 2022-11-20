@@ -19,6 +19,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -33,11 +34,20 @@ public class Downloader {
     @Autowired
     private QueueSender sender;
 
-    public void download(int skipMonthCount, int limitMonthCount) {
+    public void start(int skipMonthCount, int limitMonthCount) {
+        String erpUrl = "https://proverki.gov.ru/blob/opendata/list.xml";
+        System.out.println("\n==========================\nПоехали\n==========================\n");
+        download(0, 1, erpUrl);
+//        String erknmUrl = "https://proverki.gov.ru/blob/erknm-opendata/list.xml";
+//        System.out.println("\n==========================\nПоехали\n==========================\n");
+//        download(0, 1, erknmUrl);
+    }
 
+    public void download(int skipMonthCount, int limitMonthCount, String urlXmlData) {
+        AtomicReference<AtomicLong> count = new AtomicReference<>(new AtomicLong());
         RestTemplate restTemplate = new RestTemplate();
         //Реестр наборов данных
-        String xmlContent = restTemplate.getForObject("https://proverki.gov.ru/blob/opendata/list.xml", String.class);
+        String xmlContent = restTemplate.getForObject(urlXmlData, String.class);
         JSONObject xmlJSONObj = XML.toJSONObject(xmlContent);
         //4
         String jsonPrettyPrintString = xmlJSONObj.toString();
@@ -68,19 +78,21 @@ public class Downloader {
             //String url = zipFilesNames.get(zipFilesNames.size() - 1);
             //Пробегаемся по всем вложенным
             int fileCount = zipFilesNames.size();
-            AtomicInteger currentCount = new AtomicInteger(174);
-            zipFilesNames.stream().skip(174).forEach(url -> {
+            AtomicInteger currentCount = new AtomicInteger(0);
+            zipFilesNames.stream().skip(0).forEach(url -> {
                 System.out.println("Обрабатывается " + currentCount.incrementAndGet() + " из " + fileCount);
                 //Получить xml
                 while (createXml(restTemplate, url))
                     waitSeconds(60);
                 //порезать на отдельные проверки и отправить в rabbit
-                cutStringAndSendToRabbitmq(TEMP_XML_FILE_NAME);
+                count.set(cutStringAndSendToRabbitmq(TEMP_XML_FILE_NAME, processSender));
+                //count.set(cutStringAndSendToRabbitmq(TEMP_XML_FILE_NAME, text -> System.out.print(text.substring(text.indexOf("ERPID"), text.indexOf("ERPID") + 20))));
+                System.out.println("\ncount: " + count.get());
             });
         }
     }
 
-    public void cutStringAndSendToRabbitmq(String path) {
+    public AtomicLong cutStringAndSendToRabbitmq(String path, Consumer<StringBuilder> outer) {
         StringBuilder res = new StringBuilder();
         AtomicLong count = new AtomicLong();
         try (Stream<String> stream = Files.lines(Paths.get(path))) {
@@ -88,8 +100,8 @@ public class Downloader {
                 if (d.contains("</INSPECTION>")) {
                     if (res.indexOf("<INSPECTION ") != -1) res.replace(0, res.lastIndexOf("<INSPECTION "), "");
                     res.append(d);
-                    System.out.print(count.incrementAndGet() + " ");
-                    processSender.accept(res);
+                    outer.accept(res);
+                    System.out.print("\t" + count.incrementAndGet() + " \r");
                     res.setLength(0);
                 } else {
                     res.append(d);
@@ -99,6 +111,7 @@ public class Downloader {
             LOG.error(e.getLocalizedMessage());
             throw new RuntimeException(e);
         }
+        return count;
     }
 
     private Consumer<StringBuilder> processSender = res -> {
@@ -132,7 +145,7 @@ public class Downloader {
     }
 
     private static boolean createXml(RestTemplate restTemplate, String url) {
-        System.out.print("downloading " + url);
+        System.out.print("\ndownloading " + url);
 
         System.out.println("[X]");
         System.out.print("save zip ");
@@ -144,7 +157,7 @@ public class Downloader {
             LOG.error(e.getLocalizedMessage());
             return true;
         }
-        System.out.print("unpacking zip ");
+        System.out.print("\nunpacking zip ");
 
         try (FileSystem fileSystem = FileSystems.newFileSystem(Paths.get(TEMP_XML_FILE_NAME + ".zip"), null);
              FileOutputStream xmlOutputStream = new FileOutputStream(TEMP_XML_FILE_NAME);
